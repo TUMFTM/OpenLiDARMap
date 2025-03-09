@@ -3,6 +3,7 @@
 #include <guik/viewer/async_light_viewer.hpp>
 #include <guik/viewer/light_viewer.hpp>
 #include <memory>
+#include <fstream>
 
 #include "io/loader_factory.hpp"
 #include "io/point_cloud_saver.hpp"
@@ -39,8 +40,10 @@ Pipeline::~Pipeline() {
 bool Pipeline::initialize(const std::string &map_path,
                           const std::string &scans_dir,
                           const std::string &output_path,
+                          const std::string &imu_dir,
                           const Vector7d &initial_pose) {
     output_path_ = output_path;
+    imu_dir_ = imu_dir;
 
     // Load and initialize map
     auto map_cloud = io::LoaderFactory::loadPointCloud(scan2map_config_, map_path);
@@ -50,6 +53,12 @@ bool Pipeline::initialize(const std::string &map_path,
 
     // Get sorted scan files
     scan_files_ = utils::FileUtils::getFiles(scans_dir);
+
+    // Get sorted IMU files if directory is provided
+    if (!imu_dir.empty()) {
+        imu_files_ = utils::FileUtils::getFiles(imu_dir);
+        std::sort(imu_files_.begin(), imu_files_.end());
+    }
 
     // Initialize first two poses
     if (!initializeFirstPoses(initial_pose)) {
@@ -180,7 +189,7 @@ void Pipeline::processingLoop() {
             if (stop_requested_) break;
 
             auto frame = io::LoaderFactory::loadPointCloud(config_, scan_files_[i]);
-            if (!processFrame(frame)) {
+            if (!processFrame(frame, i)) {
                 stop_requested_ = true;
                 break;
             }
@@ -204,7 +213,7 @@ void Pipeline::processingLoop() {
     }
 }
 
-bool Pipeline::processFrame(small_gicp::PointCloud::Ptr &frame) {
+bool Pipeline::processFrame(small_gicp::PointCloud::Ptr &frame, size_t frame_idx) {
     if (!frame || frame->empty()) {
         return false;
     }
@@ -228,7 +237,12 @@ bool Pipeline::processFrame(small_gicp::PointCloud::Ptr &frame) {
 
     // Update pose graph
     updatePoseGraph(scan2map_result, scan2scan_result);
-
+    
+    // Add IMU constraint if available
+    if (!imu_files_.empty()) {
+        addIMUConstraint(frame_idx);
+    }
+    
     // Optimize
     if (!pose_graph_->optimize()) {
         return false;
@@ -426,6 +440,30 @@ void Pipeline::saveSubmap() {
 
 double Pipeline::calculateTravelledDistance(const Vector7d &pose1, const Vector7d &pose2) {
     return (pose1.head<3>() - pose2.head<3>()).norm();
+}
+
+IMUData Pipeline::getIMUDataForFrame(size_t idx) const {
+    // Check if we have valid IMU files available
+    if (imu_files_.empty() || idx >= imu_files_.size()) {
+        return IMUData(); // Return default IMU data
+    }
+    
+    try {
+        return IMUData::fromFile(imu_files_[idx]);
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: " << e.what() << std::endl;
+        return IMUData(); // Return default IMU data if file can't be read
+    }
+}
+
+void Pipeline::addIMUConstraint(size_t idx) {
+    if (idx >= scan_files_.size() || imu_files_.empty() || !pose_graph_) {
+        return;
+    }
+    
+    // Get IMU data corresponding to this frame index
+    IMUData imu_data = getIMUDataForFrame(idx);
+    pose_graph_->addIMUConstraint(idx, imu_data);
 }
 
 }  // namespace openlidarmap::pipeline

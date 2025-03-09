@@ -35,6 +35,7 @@ add_library(
   io/format/xyz.cpp
   io/format/pcd.cpp
   io/format/ply.cpp
+  core/imu_data.cpp
   io/loader_factory.cpp
   io/point_cloud_saver.cpp
   pipeline/openlidarmap.cpp

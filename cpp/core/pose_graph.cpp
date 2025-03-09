@@ -2,6 +2,7 @@
 
 #include "core/pose_factor_abs.hpp"
 #include "core/pose_factor_rel.hpp"
+#include "core/pose_factor_imu.hpp"  // Add this include
 
 namespace openlidarmap {
 
@@ -62,18 +63,48 @@ void PoseGraph::manageSlidingWindow() {
                                 : 0;
 
     if (oldest_allowed > 0 && current_fixed_pose_ != static_cast<int>(oldest_allowed)) {
-        auto &constraint = constraints_[oldest_allowed - 1];
-        if (constraint.first != nullptr) {
-            problem_.RemoveResidualBlock(constraint.first);
-            constraint.first = nullptr;
+        // Remove pose constraints that fall out of the window
+        for (size_t i = 0; i < oldest_allowed; ++i) {
+            auto &constraint = constraints_[i];
+            if (constraint.first != nullptr) {
+                problem_.RemoveResidualBlock(constraint.first);
+                constraint.first = nullptr;
+            }
+            if (constraint.second != nullptr) {
+                problem_.RemoveResidualBlock(constraint.second);
+                constraint.second = nullptr;
+            }
+            
+            // Remove IMU constraints that fall out of the window
+            if (i < imu_constraints_.size() && imu_constraints_[i] != nullptr) {
+                problem_.RemoveResidualBlock(imu_constraints_[i]);
+                imu_constraints_[i] = nullptr;
+            }
         }
-        if (constraint.second != nullptr) {
-            problem_.RemoveResidualBlock(constraint.second);
-            constraint.second = nullptr;
-        }
+        
         problem_.SetParameterBlockConstant(poses_[oldest_allowed].data());
         current_fixed_pose_ = oldest_allowed;
     }
+}
+
+void PoseGraph::addIMUConstraint(size_t idx, const IMUData& imu_data) {
+    if (idx >= poses_.size()) {
+        return;
+    }
+    
+    // Make sure imu_constraints_ vector is large enough
+    if (idx >= imu_constraints_.size()) {
+        imu_constraints_.resize(idx + 1, nullptr);
+    }
+    
+    // Add the new constraint
+    ceres::ResidualBlockId imu_block_id = problem_.AddResidualBlock(
+        new ceres::AutoDiffCostFunction<IMUError, 6, 7>(new IMUError(imu_data)),
+        new ceres::CauchyLoss(1.0), 
+        poses_[idx].data());
+    
+    problem_.SetManifold(poses_[idx].data(), pose_manifold_);
+    imu_constraints_[idx] = imu_block_id;
 }
 
 }  // namespace openlidarmap
