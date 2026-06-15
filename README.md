@@ -97,9 +97,9 @@ pip install -e .
 
 The reference maps and original map outputs (v0.0.1) used for the paper can be downloaded from the following link: https://doi.org/10.14459/2025mp1771733
 
-## Limitations
+## Prior Map Generation
 
-* Detailed instructions on how to create refrence maps are missing
+To find out how to generate reference maps, please follow this link: https://github.com/ga58lar/LoD2PCD
 
 ## Acknowledgement
 
